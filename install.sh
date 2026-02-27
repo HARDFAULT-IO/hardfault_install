@@ -6,21 +6,32 @@
 set -e
 
 # --- Visuals ---
-
+echo "------------------------------------------------"
 echo " ██   ██  █████  ██████  ██████  ███████  █████  ██    ██ ██      ████████     ██  ██████  "
 echo " ██   ██ ██   ██ ██   ██ ██   ██ ██      ██   ██ ██    ██ ██         ██        ██ ██    ██ "
 echo " ███████ ███████ ██████  ██   ██ █████   ███████ ██    ██ ██         ██        ██ ██    ██ "
 echo " ██   ██ ██   ██ ██   ██ ██   ██ ██      ██   ██ ██    ██ ██         ██        ██ ██    ██ "
 echo " ██   ██ ██   ██ ██   ██ ██████  ██      ██   ██  ██████  ███████    ██    ██  ██  ██████  "
-echo " version 0.0.1-test"
+echo " version 0.0.2-test"
 echo "------------------------------------------------"
 echo "Initializing HARDFAULT.IO Environment..."
 
-# 1. Dependency Check
+# 1. Dependency + Permissions Checks
 if ! [ -x "$(command -v docker)" ]; then
   echo 'Error: Docker is not installed. Please install Docker to run the Orchestrator: https://docs.docker.com/get-docker/' >&2
   exit 1
 fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Error: Cannot connect to Docker. You might need to run this with 'sudo' or add your user to the docker group." >&2
+  exit 1
+fi
+
+# Set network settings for mDNS, set the hostname to http://hardfault.local
+echo "Setting network identity to 'hardfault'..."
+sudo hostnamectl set-hostname hardfault || true
+# Ensure mDNS is running (Standard on Ubuntu/Jetson)
+sudo apt-get update -q && sudo apt-get install -y avahi-daemon -q
 
 # 2. Workspace Setup
 # We use a consistent home for data to ensure persistence through updates
@@ -43,7 +54,7 @@ services:
       - ./data:/app/data
     environment:
       - NODE_ENV=production
-      - TELEMETRY_PORT=8080
+      - TELEMETRY_PORT=80
 EOF
 
 # 4. Deployment
@@ -57,7 +68,7 @@ docker compose up -d
 # Waits for the Flask/API server to actually start responding
 echo -n "Waiting for Orchestrator to become healthy..."
 for i in {1..10}; do
-  if curl -s http://localhost:8080 > /dev/null; then
+  if curl -s http://localhost:80 > /dev/null; then
     echo " Done."
     break
   fi
@@ -69,12 +80,21 @@ for i in {1..10}; do
 done
 
 # 6. Success Message
+# Automated IP Discovery
+LAN_IP=$(hostname -I | awk '{print $1}')
 echo "------------------------------------------------"
 echo "✅ SUCCESS: HARDFAULT.IO is ready."
 echo "------------------------------------------------"
-echo "Dashboard:  http://localhost:8080"
-echo "Workspace:  $WORKSPACE_DIR"
-echo "Telemetry:  $WORKSPACE_DIR/data"
+echo "Local Dashboard:   http://hardfault.local"
+echo "Network Access:    http://$LAN_IP"
+
+# Check for Tailscale/VPN
+if command -v tailscale >/dev/null; then
+  echo "Tailscale Access:  http://hardfault"
+fi
+
+echo "Workspace:         $WORKSPACE_DIR"
+echo "Telemetry:         $WORKSPACE_DIR/data"
 echo ""
 echo "Note: The orchestrator will start automatically on boot."
 echo "To stop it manually, run: cd $WORKSPACE_DIR && docker compose stop"
